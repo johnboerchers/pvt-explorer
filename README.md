@@ -4,6 +4,16 @@
 
 An interactive 3D picture of how a pure substance (like water) behaves as you change its **pressure (p)**, **specific volume (v)**, and **temperature (T)**. You can rotate the surface, slice it at constant p, v, or T, and see how the familiar p-v, T-v, and p-T diagrams from class are just slices and "shadows" of this one 3D shape.
 
+## Try it in your browser (no installation)
+
+**https://johnboerchers.github.io/pvt-explorer/**
+
+The browser version works on laptops, tablets, and phones with nothing to install. It has the same slicing, diagrams, and explanations as the Python program, plus exact values when you hover over the plots. It includes water, R-134a, carbon dioxide, and a van der Waals model fluid. It needs an internet connection to load.
+
+Most students only need the link above. The rest of this guide is for the **Python version**, which you can run offline, use with any fluid in CoolProp, and modify.
+
+## Python version
+
 **No coding is required.** You only need to install Python once and type one command to run the program. This guide walks you through every step.
 
 *Instructors: see [For instructors](#for-instructors) at the end for teaching notes, accuracy, and limitations.*
@@ -214,7 +224,12 @@ Copy the *entire* error message (the last few lines are the most important) and 
 
 ## For instructors
 
-This tool was built for a sophomore-level engineering thermodynamics course. It is meant to help students connect the 3D p-v-T surface to the 2D property diagrams and tables they use every day. It is free to use, modify, and share under the MIT License.
+This tool was built for a sophomore-level engineering thermodynamics course. It comes in two versions:
+
+- **Browser version** (`index.html`, hosted at https://johnboerchers.github.io/pvt-explorer/): best for students and for projecting in lecture. It is a single self-contained file with the fluid properties precomputed from CoolProp, so it needs no installation. It loads the Plotly plotting library from a CDN, so it needs an internet connection.
+- **Python version** (`pvt_explorer.py`): best if you want to change the physics, add fluids, or run offline. It computes properties live with CoolProp.
+
+ It is meant to help students connect the 3D p-v-T surface to the 2D property diagrams and tables they use every day. It is free to use, modify, and share under the MIT License.
 
 ### Topics it supports
 - The vapor dome: saturated liquid and saturated vapor lines, the critical point, and the compressed liquid, saturated mixture, and superheated vapor regions

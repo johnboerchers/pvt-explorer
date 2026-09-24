@@ -442,7 +442,9 @@ async function build3d(keepCamera) {
                       line: { color: rgba(C.muted, 0.75), width: 3 }, visible: state.walls };
   const traces = [
     { type: "surface", x: X, y: Y, z: Z, surfacecolor: SC, cmin: 0, cmax: 3, colorscale: cscale,
-      showscale: false, customdata: CD, hovertemplate: hov, visible: state.surf,
+      showscale: false, hovertemplate: hov,
+      // Plotly 3.1 looks up surface customdata as [column][row], so pass it transposed
+      customdata: CD[0].map((_, j) => CD.map((row) => row[j])), visible: state.surf,
       lighting: { ambient: 0.62, diffuse: 0.55, specular: 0.06, roughness: 0.9, fresnel: 0.05 },
       lightposition: { x: 60000, y: -100000, z: 100000 },
       contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } } },
