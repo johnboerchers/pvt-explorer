@@ -124,7 +124,7 @@ class VanDerWaals(Fluid):
     """van der Waals fluid in reduced variables: p_r = 8T_r/(3v_r-1) - 3/v_r^2"""
 
     name = "van der Waals fluid (reduced units)"
-    T_label, p_label, v_label = "T_r", "p_r", "v_r"
+    T_label, p_label, v_label = "$T_r$", "$p_r$", "$v_r$"
 
     def __init__(self):
         self.Tc = self.pc = self.vc = 1.0
@@ -176,7 +176,7 @@ class VanDerWaals(Fluid):
 class CoolPropFluid(Fluid):
     """Real fluid from CoolProp's Helmholtz-energy equations of state."""
 
-    T_label, p_label, v_label = "T", "p", "v"
+    T_label, p_label, v_label = "$T$", "$p$", "$v$"
     T_unit, p_unit, v_unit = "°C", "kPa", "m³/kg"
 
     def __init__(self, fluid="Water"):
@@ -190,6 +190,10 @@ class CoolPropFluid(Fluid):
         self.Tmin = max(self.AS.Ttriple(), self.AS.Tmin()) + 1.0
         self.Tmax = 1.4 * self.Tc
         self.pmax = 4.5 * self.pc
+        # Some fluids (e.g. CO2) would be solid at (Tmin, pmax); since the solid
+        # isn't modeled, nudge Tmin up until the liquid exists there.
+        while not np.isfinite(self.v_PT(self.pmax, self.Tmin)) and self.Tmin < 0.9 * self.Tc:
+            self.Tmin += 1.0
         self._build_sat_table()
         self.vmax = 1.5 * self.vg(self.Tmin)
         if fluid.lower() == "water":   # textbook-friendly starting values
@@ -299,22 +303,71 @@ def dome_crossing_T(fl, v):
 
 
 # =============================================================================
-#  The 3-D surface
+#  Look and feel
 # =============================================================================
+BG = "#F4F5F7"          # figure background
+CARD = "#FFFFFF"        # panel background
+EDGE = "#D9DCE2"        # panel borders
+INK = "#1F2430"         # main text / dome
+MUTED = "#6B7280"       # secondary text
+FAINT = "#C9CED6"       # background curves
+ACCENT = "#D6336C"      # the selected slice
+ACCENT_TINT = "#FCF1F5"
+
 PHASE_COLORS = {
-    "Compressed liquid": "#3d7fd1",
-    "Liquid + vapor": "#6cbf6a",
-    "Superheated vapor / gas": "#f08c3a",
-    "Supercritical fluid": "#a9a9b8",
+    "Compressed liquid": "#3A78C9",
+    "Liquid + vapor": "#5DB28C",
+    "Superheated vapor / gas": "#EE9A55",
+    "Supercritical fluid": "#A3AABA",
+}
+PHASE_TEXT = {  # darker versions for labels
+    "liquid": "#2A5C9E", "mix": "#3C8A66", "vapor": "#C06A25", "super": "#6B7285",
 }
 
 
-def build_surface(fl, nT=55, nL=20, n2=20, nV=36):
+def apply_style():
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Inter", "Helvetica Neue", "Helvetica", "Arial",
+                            "Segoe UI", "DejaVu Sans"],
+        "mathtext.fontset": "dejavusans",
+        "font.size": 9.5,
+        "text.color": INK,
+        "axes.edgecolor": EDGE,
+        "axes.labelcolor": INK,
+        "axes.labelsize": 9.5,
+        "axes.titlesize": 10.5,
+        "axes.titleweight": "bold",
+        "axes.facecolor": CARD,
+        "axes.linewidth": 0.9,
+        "xtick.color": MUTED,
+        "ytick.color": MUTED,
+        "xtick.labelsize": 8.5,
+        "ytick.labelsize": 8.5,
+        "xtick.major.size": 3,
+        "ytick.major.size": 3,
+        "xtick.minor.size": 1.5,
+        "ytick.minor.size": 1.5,
+        "grid.color": "#E6E8EC",
+        "grid.linewidth": 0.7,
+        "figure.facecolor": BG,
+        "savefig.facecolor": BG,
+        "toolbar": "toolbar2",
+    })
+    import logging
+    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+
+
+# =============================================================================
+#  The 3-D surface
+# =============================================================================
+def build_surface(fl, nT=61, nL=22, n2=22, nV=40):
     """Grid whose columns follow the phase boundaries, so the dome edges are
     crisp: each isotherm row = [liquid | two-phase | vapor] segments."""
-    Ts = np.unique(np.append(np.linspace(fl.Tmin, fl.Tmax, nT), fl.Tc))
     from matplotlib.colors import to_rgba
-    colors = {k: np.array(to_rgba(c, 0.92)) for k, c in PHASE_COLORS.items()}
+    Ts = np.unique(np.append(np.linspace(fl.Tmin, fl.Tmax, nT), fl.Tc))
+    colors = {k: np.array(to_rgba(c)) for k, c in PHASE_COLORS.items()}
     V, P, C = [], [], []
     for T in Ts:
         vlow = fl.v_PT(fl.pmax, T)
@@ -330,7 +383,6 @@ def build_surface(fl, nT=55, nL=20, n2=20, nV=36):
         p = fl.p_Tv(T, v)
         if T < fl.Tc:
             p[nL - 1:nL - 1 + n2] = fl.psat(T)
-        # color of the cell to the right of each node
         c = np.empty((len(v), 4))
         for j in range(len(v)):
             pm = np.nanmean(p[j:j + 2])
@@ -342,7 +394,11 @@ def build_surface(fl, nT=55, nL=20, n2=20, nV=36):
                 else:
                     key = "Superheated vapor / gas"
             else:
-                key = "Supercritical fluid" if pm > fl.pc else "Superheated vapor / gas"
+                # soft blend across p = p_c, so the boundary isn't a staircase
+                t = np.clip(np.log(pm / fl.pc) / 0.25 + 0.5, 0, 1)
+                c[j] = (t * colors["Supercritical fluid"]
+                        + (1 - t) * colors["Superheated vapor / gas"])
+                continue
             c[j] = colors[key]
         V.append(v)
         P.append(p)
@@ -351,117 +407,209 @@ def build_surface(fl, nT=55, nL=20, n2=20, nV=36):
     return V, np.repeat(Ts[:, None], V.shape[1], axis=1), P, C
 
 
+def shade(X, Y, Z, C, light=(0.35, -0.5, 0.8), ambient=0.58):
+    """Soft Lambert shading computed in normalized (box) coordinates, so the
+    very different axis scales don't distort the lighting."""
+    def norm(A):
+        return (A - np.nanmin(A)) / (np.nanmax(A) - np.nanmin(A))
+    x, y, z = norm(X), norm(Y), norm(Z)
+    du = np.stack([np.gradient(a, axis=1) for a in (x, y, z)], -1)
+    dv = np.stack([np.gradient(a, axis=0) for a in (x, y, z)], -1)
+    n = np.cross(du, dv)
+    mag = np.linalg.norm(n, axis=-1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        n = n / mag
+    L = np.asarray(light) / np.linalg.norm(light)
+    lam = np.abs(np.nan_to_num(n @ L, nan=0.8))
+    k = ambient + (1 - ambient) * lam
+    out = C.copy()
+    out[..., :3] = np.clip(out[..., :3] * k[..., None] + 0.04, 0, 1)
+    return out
+
+
 # =============================================================================
 #  The interactive figure
 # =============================================================================
+MODES = ["p  (isobar)", "v  (isochore)", "T  (isotherm)"]
+
+
 class Explorer:
     def __init__(self, fl):
+        import textwrap
         import matplotlib.pyplot as plt
-        from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import FancyBboxPatch
         from matplotlib.ticker import FuncFormatter
         from matplotlib.widgets import CheckButtons, RadioButtons, Slider
 
-        self.plt, self.fl = plt, fl
+        apply_style()
+        self.plt, self.fl, self.wrap = plt, fl, textwrap
         self.mode = "T"
-        self.dyn = []           # artists that change with the slider
-        self.wall_dyn = []      # red-curve wall projections
+        self.dyn, self.wall_dyn = [], []
 
-        # ---------- data --------------------------------------------------
         print("Building surface ...", flush=True)
         V, T, P, C = build_surface(fl)
         self.X = np.log10(V)
         self.Y = fl.T_disp(T)
         self.Z = np.log10(fl.p_disp(P))
         dT, dp = fl.T_disp, fl.p_disp
-
-        # dome (sat. liquid line up to critical point, sat. vapor line down)
         self.dome_v = np.concatenate([fl.sat_vf, fl.sat_vg[::-1]])
         self.dome_T = np.concatenate([fl.sat_T, fl.sat_T[::-1]])
         self.dome_p = np.concatenate([fl.sat_p, fl.sat_p[::-1]])
 
-        # ---------- figure -----------------------------------------------
-        self.fig = fig = plt.figure(figsize=(15.5, 9))
-        fig.canvas.manager.set_window_title("p-v-T surface explorer")
-        fig.suptitle(f"p–v–T surface: {fl.name}", fontsize=14, weight="bold",
-                     x=0.27, y=0.985)
+        # ---------- figure & header ---------------------------------------
+        self.fig = fig = plt.figure(figsize=(15.5, 9.2))
+        try:
+            fig.canvas.manager.set_window_title("p-v-T Surface Explorer")
+        except Exception:
+            pass
+        fig.text(0.02, 0.968, "p–v–T Surface Explorer", fontsize=17,
+                 weight="bold", color=INK)
+        fig.text(0.02, 0.940, f"{fl.name}   ·   drag the 3-D plot to rotate   ·   "
+                 "hold one property constant to slice the surface",
+                 fontsize=9.5, color=MUTED)
+        handles = [Line2D([], [], marker="s", ls="", ms=10, mfc=c, mec="none",
+                          label=k) for k, c in PHASE_COLORS.items()]
+        handles += [Line2D([], [], color=INK, lw=2, label="Saturation (vapor dome)"),
+                    Line2D([], [], color=ACCENT, lw=2.5, label="Selected slice")]
+        fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.015, 0.93),
+                   ncol=3, frameon=False, fontsize=9, handletextpad=0.4,
+                   columnspacing=1.4)
 
-        ax = self.ax3 = fig.add_axes([0.0, 0.2, 0.55, 0.77], projection="3d")
-        self.surf = ax.plot_surface(self.X, self.Y, self.Z, facecolors=C,
-                                    rstride=1, cstride=1, linewidth=0.15,
-                                    edgecolor=(0, 0, 0, 0.25), shade=False,
-                                    antialiased=False)
-        ax.plot(np.log10(self.dome_v), dT(self.dome_T),
-                np.log10(dp(self.dome_p)), "k-", lw=2.2, zorder=10)
-        self.cp3 = (np.log10(fl.vc), float(dT(fl.Tc)), np.log10(float(dp(fl.pc))))
-        ax.scatter(*self.cp3, color="k", s=40, zorder=11, depthshade=False)
+        # ---------- 3-D axes ------------------------------------------------
+        ax = self.ax3 = fig.add_axes([-0.03, 0.175, 0.62, 0.725], projection="3d")
+        ax.set_facecolor("none")
+        ax.computed_zorder = False
+        for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+            axis.set_pane_color((1, 1, 1, 0.55))
+            axis.pane.set_edgecolor(EDGE)
+            axis.line.set_color(EDGE)
 
         xl = (np.nanmin(self.X) - 0.35, np.nanmax(self.X) + 0.05)
         yl = (np.nanmin(self.Y), np.nanmax(self.Y))
         zl = (np.nanmin(self.Z) - 0.2, np.nanmax(self.Z) + 0.05)
         self.lims = xl, yl, zl
+        xw, yw, zw = xl[0], yl[1], zl[0]
+
+        # wall shadows of the dome (drawn first = behind everything)
+        lv, lT, lp = np.log10(self.dome_v), dT(self.dome_T), np.log10(dp(self.dome_p))
+        kw = dict(color="#8C93A1", lw=1.2, zorder=0)
+        self.wall_static = [
+            ax.plot(lv, np.full_like(lv, yw), lp, **kw)[0],
+            ax.plot(lv, lT, np.full_like(lv, zw), **kw)[0],
+            ax.plot(np.full_like(lT, xw), lT, lp, **kw)[0],
+        ]
+
+        FC = shade(self.X, self.Y, self.Z, C)
+        surf = ax.plot_surface(self.X, self.Y, self.Z, facecolors=FC,
+                               rstride=1, cstride=1, linewidth=0.3, shade=False,
+                               antialiased=True, zorder=1)
+        try:   # edges the same color as faces hides hairline seams between cells
+            surf.set_edgecolor(surf._facecolor3d)
+        except Exception:
+            surf.set_linewidth(0)
+        self.surf = [surf]
+        # a few isotherms drawn on the surface as subtle contour lines
+        for i in range(0, self.X.shape[0], 6):
+            self.surf.append(ax.plot(self.X[i], self.Y[i], self.Z[i], color="white",
+                                     lw=0.6, alpha=0.55, zorder=2)[0])
+        ax.plot(lv, lT, lp, color=INK, lw=2.2, zorder=4)
+        self.cp3 = (np.log10(fl.vc), float(dT(fl.Tc)), np.log10(float(dp(fl.pc))))
+        ax.scatter(*self.cp3, s=36, color="white", edgecolor=INK, linewidth=1.5,
+                   depthshade=False, zorder=6)
+
         ax.set_xlim(xl); ax.set_ylim(yl); ax.set_zlim(zl)
         pow10 = FuncFormatter(lambda x, _: f"$10^{{{int(round(x))}}}$")
         ax.set_xticks(np.arange(np.ceil(xl[0]), np.floor(xl[1]) + 1))
         ax.set_zticks(np.arange(np.ceil(zl[0]), np.floor(zl[1]) + 1))
         ax.xaxis.set_major_formatter(pow10)
         ax.zaxis.set_major_formatter(pow10)
-        ax.set_xlabel(self._lab("v"), labelpad=8)
-        ax.set_ylabel(self._lab("T"), labelpad=8)
-        ax.set_zlabel(self._lab("p"), labelpad=6)
+        ax.tick_params(labelsize=8.5, colors=MUTED, pad=1)
+        ax.set_xlabel(self._lab("v"), labelpad=7)
+        ax.set_ylabel(self._lab("T"), labelpad=7)
+        ax.set_zlabel(self._lab("p"), labelpad=5)
+        try:
+            ax.set_box_aspect((1.25, 1.0, 0.85), zoom=1.08)
+        except TypeError:
+            ax.set_box_aspect((1.25, 1.0, 0.85))
         ax.view_init(elev=22, azim=-58)
-        ax.legend(handles=[Patch(color=c, label=k) for k, c in PHASE_COLORS.items()],
-                  loc="upper left", fontsize=8.5, framealpha=0.9)
 
-        # static wall projections of the dome (far walls for default view)
-        xw, yw, zw = xl[0], yl[1], zl[0]
-        lv, lT, lp = np.log10(self.dome_v), dT(self.dome_T), np.log10(dp(self.dome_p))
-        kw = dict(color="0.35", lw=1.3)
-        self.wall_static = [
-            ax.plot(lv, np.full_like(lv, yw), lp, **kw)[0],        # p-v wall
-            ax.plot(lv, lT, np.full_like(lv, zw), **kw)[0],        # T-v wall
-            ax.plot(np.full_like(lT, xw), lT, lp, **kw)[0],        # p-T wall
-        ]
-
-        # ---------- 2-D panels -------------------------------------------
-        w, h, x0 = 0.37, 0.215, 0.61
+        # ---------- 2-D panels ----------------------------------------------
+        w, h, x0 = 0.37, 0.195, 0.608
         self.ax_pv = fig.add_axes([x0, 0.745, w, h])
-        self.ax_Tv = fig.add_axes([x0, 0.445, w, h])
-        self.ax_pT = fig.add_axes([x0, 0.145, w, h])
+        self.ax_Tv = fig.add_axes([x0, 0.475, w, h])
+        self.ax_pT = fig.add_axes([x0, 0.205, w, h])
         self._setup_2d()
 
-        # ---------- widgets ----------------------------------------------
-        fig.text(0.02, 0.165, "Hold constant:", fontsize=10, weight="bold")
-        rax = fig.add_axes([0.02, 0.035, 0.1, 0.12])
-        self.radio = RadioButtons(rax, ["p (isobar)", "v (isochore)", "T (isotherm)"],
-                                  active=2)
-        cax = fig.add_axes([0.13, 0.06, 0.13, 0.09])
-        self.checks = CheckButtons(cax, ["Wall projections", "Show surface"],
-                                   [True, True])
-        sax = fig.add_axes([0.31, 0.12, 0.22, 0.03])
-        self.slider = Slider(sax, "", 0, 1, valinit=0.5, color="tab:red")
+        # ---------- bottom cards -------------------------------------------
+        def card(x, y, cw, ch):
+            fig.add_artist(FancyBboxPatch((x, y), cw, ch, transform=fig.transFigure,
+                                          boxstyle="round,pad=0,rounding_size=0.008",
+                                          fc=CARD, ec=EDGE, lw=0.9, zorder=-1))
+        card(0.015, 0.018, 0.56, 0.15)
+        card(0.608, 0.018, 0.37, 0.15)
+
+        def caps(x, y, s):
+            fig.text(x, y, s, fontsize=8, weight="bold", color=MUTED)
+
+        caps(0.03, 0.143, "HOLD CONSTANT")
+        caps(0.165, 0.143, "DISPLAY")
+        caps(0.622, 0.143, "WHAT'S HAPPENING")
+
+        rax = fig.add_axes([0.025, 0.028, 0.13, 0.11])
+        cax = fig.add_axes([0.16, 0.058, 0.12, 0.08])
+        for a in (rax, cax):
+            a.set_facecolor("none")
+            for sp in a.spines.values():
+                sp.set_visible(False)
+        try:
+            self.radio = RadioButtons(
+                rax, MODES, active=2, activecolor=ACCENT,
+                label_props={"fontsize": [10] * 3, "color": [INK] * 3},
+                radio_props={"s": [70] * 3, "edgecolor": ["#9AA0AB"] * 3})
+        except TypeError:   # matplotlib < 3.7
+            self.radio = RadioButtons(rax, MODES, active=2, activecolor=ACCENT)
+        try:
+            self.checks = CheckButtons(
+                cax, ["Wall projections", "Show surface"], [True, True],
+                label_props={"fontsize": [10] * 2, "color": [INK] * 2},
+                frame_props={"s": [70] * 2, "edgecolor": ["#9AA0AB"] * 2},
+                check_props={"color": [ACCENT] * 2, "s": [45] * 2})
+        except TypeError:
+            self.checks = CheckButtons(cax, ["Wall projections", "Show surface"], [True, True])
+
+        self.slider_title = fig.text(0.31, 0.143, "", fontsize=8, weight="bold", color=MUTED)
+        sax = fig.add_axes([0.31, 0.085, 0.2, 0.03])
+        sax.set_facecolor("none")
+        self.slider = Slider(sax, "", 0, 1, valinit=0.5, color=ACCENT,
+                             track_color="#E4E6EA",
+                             handle_style={"facecolor": "white", "edgecolor": ACCENT,
+                                           "size": 13})
         self.slider.vline.set_visible(False)
-        self.slider_title = fig.text(0.31, 0.16, "", fontsize=10, weight="bold")
-        self.status = fig.text(0.29, 0.005, "", fontsize=9, va="bottom",
-                               wrap=True, linespacing=1.35)
+        self.slider.valtext.set_visible(False)
+        self.value_text = fig.text(0.31, 0.028, "", fontsize=15, weight="bold", color=ACCENT)
+        self.range_text = fig.text(0.51, 0.064, "", fontsize=8, color=MUTED, ha="right")
+
+        self.status = fig.text(0.622, 0.128, "", fontsize=9, va="top", color=INK,
+                               linespacing=1.45)
 
         self.radio.on_clicked(self._on_mode)
         self.checks.on_clicked(self._on_check)
         self.slider.on_changed(self._update)
-        self._on_mode("T (isotherm)")
+        self._on_mode(MODES[2])
 
     # ------------------------------------------------------------------
     def _lab(self, q):
         fl = self.fl
         name = {"p": fl.p_label, "v": fl.v_label, "T": fl.T_label}[q]
         unit = {"p": fl.p_unit, "v": fl.v_unit, "T": fl.T_unit}[q]
-        return f"{name} [{unit}]" if unit else name
+        return f"{name}  [{unit}]" if unit else name
 
     def _setup_2d(self):
         fl, dT, dp = self.fl, self.fl.T_disp, self.fl.p_disp
-        g = dict(color="0.72", lw=0.9)
-        dome = dict(color="k", lw=2)
+        g = dict(color=FAINT, lw=0.8, zorder=1)
+        dome = dict(color=INK, lw=2, zorder=3)
 
-        # background families of curves
         Tbg = np.unique(np.concatenate([
             np.linspace(fl.Tmin, fl.Tc, 5)[1:-1], [fl.Tc],
             np.linspace(fl.Tc, fl.Tmax, 4)[1:]]))
@@ -473,9 +621,8 @@ class Explorer:
         for T in Tbg:
             v, _, p = isotherm(fl, T)
             a.plot(v, dp(p), **g)
-        a.plot(self.dome_v, dp(self.dome_p), **dome, label="Saturation (vapor dome)")
+        a.plot(self.dome_v, dp(self.dome_p), **dome)
         a.set(xscale="log", yscale="log", xlabel=self._lab("v"), ylabel=self._lab("p"))
-        a.set_title("p–v plane   (gray: isotherms)", fontsize=10)
 
         a = self.ax_Tv
         for p in pbg:
@@ -483,7 +630,6 @@ class Explorer:
             a.plot(v, dT(T), **g)
         a.plot(self.dome_v, dT(self.dome_T), **dome)
         a.set(xscale="log", xlabel=self._lab("v"), ylabel=self._lab("T"))
-        a.set_title("T–v plane   (gray: isobars)", fontsize=10)
 
         a = self.ax_pT
         for v in vbg:
@@ -491,30 +637,71 @@ class Explorer:
             a.plot(dT(T), dp(p), **g)
         a.plot(dT(fl.sat_T), dp(fl.sat_p), **dome)
         a.set(yscale="log", xlabel=self._lab("T"), ylabel=self._lab("p"))
-        a.set_title("p–T plane   (gray: isochores)", fontsize=10)
-        tk = dict(transform=a.transAxes, fontsize=9, color="0.25", style="italic")
-        a.text(0.08, 0.82, "Liquid", **tk)
-        a.text(0.62, 0.15, "Vapor / gas", **tk)
-        a.text(0.72, 0.9, "Supercritical", **tk)
-        a.text(0.33, 0.47, "vaporization\ncurve", **tk)
 
-        # region labels and critical points
+        self.panel_names = {self.ax_pv: ("p–v diagram", "gray lines: isotherms"),
+                            self.ax_Tv: ("T–v diagram", "gray lines: isobars"),
+                            self.ax_pT: ("p–T diagram", "gray lines: isochores")}
+        self.role_titles = {}
+        for a, (name, sub) in self.panel_names.items():
+            a.set_title(f"{name}", loc="left", pad=6)
+            a.text(0.5, 1.0, sub, transform=a.transAxes, ha="center", va="bottom",
+                   fontsize=8, color=MUTED)
+            self.role_titles[a] = a.set_title("", loc="right", pad=6, fontsize=8.5)
+
+        # region labels in phase colors. Positions are computed from the
+        # saturation data (not fixed screen fractions) so every label is
+        # guaranteed to sit inside the region it names, for any fluid.
+        lk = dict(fontsize=9, style="italic", weight="bold", ha="center",
+                  va="center", zorder=4)
+        xl, yl, zl = self.lims
+        p_floor = fl.p_si(10 ** zl[0])            # bottom of the p axes (SI)
+
+        def T_on_vg(v):   # temperature where the sat. vapor line has volume v
+            return np.interp(np.log(v), np.log(fl.sat_vg[::-1]), fl.sat_T[::-1])
+
+        # liquid + vapor: middle of the dome
         Tm = fl.Tmin + 0.6 * (fl.Tc - fl.Tmin)
         vm = np.sqrt(fl.vf(Tm) * fl.vg(Tm))
-        self.ax_pv.text(vm, dp(fl.psat(Tm)) * 0.55, "L + V", ha="center",
-                        fontsize=9, style="italic", color="0.25")
-        self.ax_Tv.text(vm, dT(Tm - 0.12 * (fl.Tc - fl.Tmin)), "L + V",
-                        ha="center", fontsize=9, style="italic", color="0.25")
+        self.ax_pv.text(vm, dp(np.sqrt(fl.psat(fl.Tmin) * fl.psat(Tm))), "liquid + vapor",
+                        color=PHASE_TEXT["mix"], **lk)
+        self.ax_Tv.text(vm, dT(fl.Tmin + 0.3 * (Tm - fl.Tmin)), "liquid + vapor",
+                        color=PHASE_TEXT["mix"], **lk)
+
+        # vapor: right of the saturated-vapor line, below the critical isotherm
+        v_lab = 10 ** (xl[0] + 0.8 * (xl[1] - xl[0]))
+        if v_lab < fl.vg(fl.Tmin):
+            T_star = T_on_vg(v_lab)
+        else:                                     # dome doesn't reach this far
+            T_star = fl.Tmin
+        # In p-v the band between the dome and the critical isotherm is thin at
+        # large v, so put the label above the hottest isotherm instead: that is
+        # still vapor/gas (T > T_c but p << p_c) and there is open space there.
+        p_hot = fl.p_Tv(fl.Tmax, v_lab) * 10 ** (0.12 * (zl[1] - zl[0]))
+        self.ax_pv.text(v_lab, dp(min(p_hot, 0.5 * fl.pc)), "vapor",
+                        color=PHASE_TEXT["vapor"], **lk)
+        self.ax_Tv.text(v_lab, dT(T_star + 0.45 * (fl.Tc - T_star)), "vapor",
+                        color=PHASE_TEXT["vapor"], **lk)
+
+        # p-T: liquid above the vaporization curve, vapor below it,
+        # supercritical above and to the right of the critical point
+        TL = fl.Tmin + 0.25 * (fl.Tc - fl.Tmin)
+        self.ax_pT.text(dT(TL), dp(np.sqrt(fl.psat(TL) * fl.pmax)), "liquid",
+                        color=PHASE_TEXT["liquid"], **lk)
+        TV = fl.Tmin + 0.6 * (fl.Tc - fl.Tmin)
+        self.ax_pT.text(dT(TV), dp(np.sqrt(p_floor * fl.psat(TV))), "vapor / gas",
+                        color=PHASE_TEXT["vapor"], **lk)
+        self.ax_pT.text(dT(fl.Tc + 0.55 * (fl.Tmax - fl.Tc)), dp(np.sqrt(fl.pc * fl.pmax)),
+                        "supercritical", color=PHASE_TEXT["super"], **lk)
+
         for a, x, y in ((self.ax_pv, fl.vc, dp(fl.pc)), (self.ax_Tv, fl.vc, dT(fl.Tc)),
                         (self.ax_pT, dT(fl.Tc), dp(fl.pc))):
-            a.plot(x, y, "ko", ms=5)
-            a.annotate("critical point", (x, y), xytext=(6, 6),
-                       textcoords="offset points", fontsize=8)
-            a.grid(True, which="major", alpha=0.3)
-            a.tick_params(labelsize=8)
+            a.plot(x, y, "o", ms=6, mfc="white", mec=INK, mew=1.5, zorder=6)
+            a.annotate("critical point", (x, y), xytext=(7, 5),
+                       textcoords="offset points", fontsize=8, color=INK, zorder=6)
+            a.grid(True, which="major")
+            a.set_axisbelow(True)
             a.autoscale(False)
 
-        # sensible limits
         xl, yl, zl = self.lims
         self.ax_pv.set_xlim(10 ** xl[0], 10 ** xl[1]); self.ax_pv.set_ylim(10 ** zl[0], 10 ** zl[1])
         self.ax_Tv.set_xlim(10 ** xl[0], 10 ** xl[1]); self.ax_Tv.set_ylim(*yl)
@@ -527,19 +714,23 @@ class Explorer:
         d = fl.defaults
         if self.mode == "p":
             lo, hi = np.log10(fl.p_disp(fl.psat(fl.Tmin) * 1.5)), np.log10(fl.p_disp(fl.pmax / 1.2))
-            val, title = np.log10(fl.p_disp(d["p"])), "Pressure (log scale)"
+            val, title = np.log10(fl.p_disp(d["p"])), "PRESSURE"
+            rng = (f"{10**lo:.3g} – {10**hi:.3g} {fl.p_unit}".strip(), "log scale")
         elif self.mode == "v":
             lo = np.log10(fl.v_PT(fl.pmax, fl.Tmin) * 1.02)
             hi = np.log10(fl.vmax / 1.5)
-            val, title = np.log10(d["v"]), "Specific volume (log scale)"
+            val, title = np.log10(d["v"]), "SPECIFIC VOLUME"
+            rng = (f"{10**lo:.3g} – {10**hi:.3g} {fl.v_unit}".strip(), "log scale")
         else:
             lo, hi = float(fl.T_disp(fl.Tmin)), float(fl.T_disp(fl.Tmax))
-            val, title = float(fl.T_disp(d["T"])), "Temperature"
+            val, title = float(fl.T_disp(d["T"])), "TEMPERATURE"
+            rng = (f"{lo:.3g} – {hi:.3g} {fl.T_unit}".strip(), "")
         self.slider_title.set_text(title)
+        self.range_text.set_text(rng[0] + (f"  ({rng[1]})" if rng[1] else ""))
         s = self.slider
         s.valmin, s.valmax = lo, hi
         s.ax.set_xlim(lo, hi)
-        if hasattr(s.poly, "set_x"):      # keep the filled bar anchored at the left end
+        if hasattr(s.poly, "set_x"):
             s.poly.set_x(lo)
         else:
             s.poly.set_visible(False)
@@ -549,7 +740,8 @@ class Explorer:
         on = self.checks.get_status()
         for a in self.wall_static + self.wall_dyn:
             a.set_visible(on[0])
-        self.surf.set_visible(on[1])
+        for a in self.surf:
+            a.set_visible(on[1])
         self.fig.canvas.draw_idle()
 
     # ------------------------------------------------------------------
@@ -564,38 +756,51 @@ class Explorer:
         if self.mode == "p":
             p = float(fl.p_si(10 ** val))
             v, T, P = isobar(fl, p)
-            txt = f"p = {dp(p):.4g} {fl.p_unit}"
-            self.status.set_text(self._describe_p(p))
+            txt = f"{fl.p_label} = {dp(p):.4g} {fl.p_unit}"
+            msg = self._describe_p(p)
             plane_axis, plane_val, home = "z", np.log10(dp(p)), self.ax_Tv
         elif self.mode == "v":
             vv = 10 ** val
             v, T, P = isochore(fl, vv)
-            txt = f"v = {vv:.4g} {fl.v_unit}"
-            self.status.set_text(self._describe_v(vv))
+            txt = f"{fl.v_label} = {vv:.4g} {fl.v_unit}"
+            msg = self._describe_v(vv)
             plane_axis, plane_val, home = "x", val, self.ax_pT
         else:
             Tk = float(fl.T_si(val))
             v, T, P = isotherm(fl, Tk)
-            txt = f"T = {val:.4g} {fl.T_unit}"
-            self.status.set_text(self._describe_T(Tk))
+            txt = f"{fl.T_label} = {val:.4g} {fl.T_unit}"
+            msg = self._describe_T(Tk)
             plane_axis, plane_val, home = "y", val, self.ax_pv
-        self.slider.valtext.set_text(txt)
+        self.value_text.set_text(txt)
+        paras = [self.wrap.fill(s, 82) for s in msg.split("\n")]
+        self.status.set_text("\n".join(paras))
 
-        # --- 3-D: cutting plane + intersection curve
-        g = np.linspace(0, 1, 2)
-        A, B = np.meshgrid(g, g)
+        # --- 3-D: cutting plane with outline + intersection curve
+        c = np.array([0.0, 1.0, 1.0, 0.0, 0.0])
+        r = np.array([0.0, 0.0, 1.0, 1.0, 0.0])
+        A, B = np.meshgrid([0.0, 1.0], [0.0, 1.0])
+        sx, sy, sz = (lambda t: xl[0] + t * np.ptp(xl)), (lambda t: yl[0] + t * np.ptp(yl)), \
+                     (lambda t: zl[0] + t * np.ptp(zl))
         if plane_axis == "x":
-            PX, PY, PZ = np.full_like(A, plane_val), yl[0] + A * np.ptp(yl), zl[0] + B * np.ptp(zl)
+            surf = (np.full_like(A, plane_val), sy(A), sz(B))
+            edge = (np.full_like(c, plane_val), sy(c), sz(r))
         elif plane_axis == "y":
-            PX, PY, PZ = xl[0] + A * np.ptp(xl), np.full_like(A, plane_val), zl[0] + B * np.ptp(zl)
+            surf = (sx(A), np.full_like(A, plane_val), sz(B))
+            edge = (sx(c), np.full_like(c, plane_val), sz(r))
         else:
-            PX, PY, PZ = xl[0] + A * np.ptp(xl), yl[0] + B * np.ptp(yl), np.full_like(A, plane_val)
-        self.dyn.append(ax.plot_surface(PX, PY, PZ, color="tab:red", alpha=0.13,
-                                        shade=False, zorder=1))
-        lv, lT, lp = np.log10(v), dT(T), np.log10(dp(P))
-        self.dyn.append(ax.plot(lv, lT, lp, color="red", lw=3, zorder=20)[0])
+            surf = (sx(A), sy(B), np.full_like(A, plane_val))
+            edge = (sx(c), sy(r), np.full_like(c, plane_val))
+        self.dyn.append(ax.plot_surface(*surf, color=ACCENT, alpha=0.09, shade=False,
+                                        linewidth=0, zorder=3))
+        self.dyn.append(ax.plot(*edge, color=ACCENT, lw=0.8, alpha=0.45, zorder=3)[0])
 
-        kw = dict(color="red", lw=1.6, ls="--")
+        lv, lT, lp = np.log10(v), dT(T), np.log10(dp(P))
+        self.dyn.append(ax.plot(lv, lT, lp, color="white", lw=5.5, alpha=0.9,
+                                solid_capstyle="round", zorder=7)[0])
+        self.dyn.append(ax.plot(lv, lT, lp, color=ACCENT, lw=3, solid_capstyle="round",
+                                zorder=8)[0])
+
+        kw = dict(color=ACCENT, lw=1.3, ls=(0, (4, 2)), alpha=0.8, zorder=0.5)
         self.wall_dyn = [
             ax.plot(lv, np.full_like(lv, yl[1]), lp, **kw)[0],
             ax.plot(lv, lT, np.full_like(lv, zl[0]), **kw)[0],
@@ -604,18 +809,24 @@ class Explorer:
         for a in self.wall_dyn:
             a.set_visible(self.checks.get_status()[0])
 
-        # --- 2-D: same curve in every plane
-        ck = dict(color="red", lw=2.6, zorder=5)
+        # --- 2-D: same curve in every plane; tag the slice plane
+        ck = dict(color=ACCENT, lw=2.6, zorder=5, solid_capstyle="round")
         self.dyn.append(self.ax_pv.plot(v, dp(P), **ck)[0])
         self.dyn.append(self.ax_Tv.plot(v, dT(T), **ck)[0])
         self.dyn.append(self.ax_pT.plot(dT(T), dp(P), **ck)[0])
         for a in (self.ax_pv, self.ax_Tv, self.ax_pT):
+            is_home = a is home
+            a.set_facecolor(ACCENT_TINT if is_home else CARD)
             for sp in a.spines.values():
-                sp.set_color("red" if a is home else "black")
-                sp.set_linewidth(2.2 if a is home else 0.8)
+                sp.set_color(ACCENT if is_home else EDGE)
+                sp.set_linewidth(1.6 if is_home else 0.9)
+            t = self.role_titles[a]
+            t.set_text("● SLICE PLANE" if is_home else "projection")
+            t.set_color(ACCENT if is_home else MUTED)
+            t.set_fontweight("bold" if is_home else "normal")
         self.fig.canvas.draw_idle()
 
-    # ---- plain-language explanations for the status line ----------------
+    # ---- plain-language explanations for the status card ----------------
     def _f(self, q, x):
         fl = self.fl
         if q == "T":
@@ -631,45 +842,48 @@ class Explorer:
                     "inflection point at the critical point.")
         if p > fl.pc:
             return (f"Supercritical isobar (p > p_c = {self._f('p', fl.pc)}): heating turns "
-                    "the liquid-like fluid into a gas-like fluid continuously; "
-                    "no boiling, no plateau in T–v.")
+                    "the liquid-like fluid into a gas-like fluid continuously. There is "
+                    "no boiling and no plateau in the T–v diagram.")
         Ts = float(fl.Tsat(p))
-        return (f"Isobar below p_c: compressed liquid → saturated liquid (v_f = {self._f('v', fl.vf(Ts))}) "
-                f"→ boils at constant T_sat = {self._f('T', Ts)} (flat line in T–v) → saturated vapor "
-                f"(v_g = {self._f('v', fl.vg(Ts))}) → superheated vapor.\n"
-                "In p–T the whole boiling process is a single point on the vaporization curve.")
+        return (f"Constant-pressure heating below p_c: compressed liquid → saturated liquid "
+                f"(v_f = {self._f('v', fl.vf(Ts))}) → boils at constant T_sat = {self._f('T', Ts)} "
+                f"→ saturated vapor (v_g = {self._f('v', fl.vg(Ts))}) → superheated vapor.\n"
+                "The flat segment in T–v is the boiling process; in p–T the whole thing "
+                "collapses to a single point on the vaporization curve.")
 
     def _describe_T(self, T):
         fl = self.fl
         if abs(T - fl.Tc) < 0.005 * fl.Tc:
-            return ("Critical isotherm: horizontal inflection at the critical point "
-                    "(∂p/∂v = ∂²p/∂v² = 0).")
+            return ("Critical isotherm: it has a horizontal inflection point at the "
+                    "critical point (∂p/∂v = ∂²p/∂v² = 0).")
         if T > fl.Tc:
-            return (f"Isotherm above T_c = {self._f('T', fl.Tc)}: no phase change at any pressure; "
-                    "at large v it approaches ideal-gas behaviour, pv ≈ RT.")
+            return (f"Isotherm above T_c = {self._f('T', fl.Tc)}: no phase change at any "
+                    "pressure. At large v it approaches ideal-gas behavior, pv ≈ RT.")
         ps = fl.psat(T)
-        return (f"Isotherm below T_c: compressed liquid (steep, nearly incompressible) → saturated "
-                f"liquid → liquid-vapor mixture at constant p_sat = {self._f('p', ps)} "
+        return (f"Isotherm below T_c: compressed liquid (steep, nearly incompressible) → "
+                f"saturated liquid → liquid-vapor mixture at constant p_sat = {self._f('p', ps)} "
                 f"(v from {self._f('v', fl.vf(T))} to {self._f('v', fl.vg(T))}) → superheated vapor.\n"
-                "Constant T and constant p go together inside the dome: in p–T the mixture is one point.")
+                "Inside the dome, constant T means constant p, so in p–T the mixture is one point.")
 
     def _describe_v(self, v):
         fl = self.fl
         if abs(v / fl.vc - 1) < 0.03:
-            return ("Rigid tank filled at the critical specific volume: on heating, the meniscus "
-                    "stays put and vanishes at the critical point.")
+            return ("Rigid tank filled at the critical specific volume: on heating, the "
+                    "liquid-vapor interface stays put and vanishes at the critical point.")
         Tx = dome_crossing_T(fl, v)
         if Tx is None:
             return "This isochore does not enter the vapor dome in the plotted range."
         px = fl.psat(Tx)
         if v < fl.vc:
-            return (f"Rigid tank, v < v_c: heating a liquid-vapor mixture raises p along the saturation "
-                    f"curve until the tank is full of saturated liquid at T = {self._f('T', Tx)}, "
-                    f"p = {self._f('p', px)};\nafter that p shoots up (compressed liquid). "
-                    "Note the kink in p–T where the isochore leaves the vaporization curve.")
-        return (f"Rigid tank, v > v_c: heating a liquid-vapor mixture evaporates the liquid; it becomes "
-                f"saturated vapor at T = {self._f('T', Tx)}, p = {self._f('p', px)};\n"
-                "after that it is superheated vapor and p rises gently (roughly p ∝ T, like an ideal gas).")
+            return (f"Rigid tank, v < v_c: heating a liquid-vapor mixture raises p along the "
+                    f"saturation curve until the tank is full of saturated liquid at "
+                    f"T = {self._f('T', Tx)}, p = {self._f('p', px)}.\n"
+                    "After that, p shoots up (compressed liquid). Note the kink in p–T where "
+                    "the isochore leaves the vaporization curve.")
+        return (f"Rigid tank, v > v_c: heating a liquid-vapor mixture evaporates the liquid "
+                f"until it is saturated vapor at T = {self._f('T', Tx)}, p = {self._f('p', px)}.\n"
+                "After that it is superheated vapor and p rises gently (roughly p ∝ T, like an "
+                "ideal gas).")
 
 
 # =============================================================================
@@ -697,9 +911,9 @@ def main():
 
     ex = Explorer(fl)
     if args.save:
-        for lab in ("p (isobar)", "v (isochore)", "T (isotherm)"):
-            ex.radio.set_active(["p (isobar)", "v (isochore)", "T (isotherm)"].index(lab))
-            ex.fig.savefig(f"{args.save}_{lab[0]}.png", dpi=110)
+        for i, lab in enumerate(MODES):
+            ex.radio.set_active(i)
+            ex.fig.savefig(f"{args.save}_{lab[0]}.png", dpi=120)
             print("saved", f"{args.save}_{lab[0]}.png")
         return
     plt.show()
