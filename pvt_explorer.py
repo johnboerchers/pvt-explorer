@@ -81,9 +81,11 @@ class Fluid:
 
     # ---- saturation table ---------------------------------------------------
     def _build_sat_table(self, n=260):
-        # points clustered near the critical point, where the dome closes
+        # evenly spaced points (accurate table look-ups everywhere) plus points
+        # clustered near the critical point, where the dome closes sharply
         s = np.geomspace(1e-6, 1.0, n)
-        Ts = np.sort(self.Tc - s * (self.Tc - self.Tmin))
+        Ts = np.unique(np.concatenate([np.linspace(self.Tmin, self.Tc, 500)[:-1],
+                                       self.Tc - s * (self.Tc - self.Tmin)]))
         rows = []
         for T in Ts:
             try:
