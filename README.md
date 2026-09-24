@@ -1,8 +1,12 @@
 # p-v-T Surface Explorer
 
+![p-v-T explorer showing a 1 MPa isobar crossing the vapor dome of water](images/screenshot_p.png)
+
 An interactive 3D picture of how a pure substance (like water) behaves as you change its **pressure (p)**, **specific volume (v)**, and **temperature (T)**. You can rotate the surface, slice it at constant p, v, or T, and see how the familiar p-v, T-v, and p-T diagrams from class are just slices and "shadows" of this one 3D shape.
 
 **No coding is required.** You only need to install Python once and type one command to run the program. This guide walks you through every step.
+
+*Instructors: see [For instructors](#for-instructors) at the end for teaching notes, accuracy, and limitations.*
 
 ---
 
@@ -75,8 +79,9 @@ You'll see a lot of text scroll by. It's finished when you get your blinking cur
 
 ## Step 4: Download and find the program
 
-1. Save `pvt_explorer.py` somewhere easy to find. We suggest making a folder called `thermo` on your Desktop and putting it there.
-2. In the terminal, move into that folder using the `cd` ("change directory") command:
+1. On the GitHub page for this project, click the green **Code** button, then **Download ZIP**. Unzip it (on Windows: right-click → *Extract All*). You don't need a GitHub account.
+2. Put the unzipped folder somewhere easy to find. We suggest renaming it `thermo` and putting it on your Desktop.
+3. In the terminal, move into that folder using the `cd` ("change directory") command:
 
    **Windows:**
    ```
@@ -89,11 +94,11 @@ You'll see a lot of text scroll by. It's finished when you get your blinking cur
 
    **Tip:** type `cd ` (with a space after it), then drag the `thermo` folder from your file browser into the terminal window. It will fill in the full path for you. Press Enter.
 
-3. Check that you're in the right place by listing the files:
+4. Check that you're in the right place by listing the files:
    - Windows: `dir`
    - Mac: `ls`
 
-   You should see `pvt_explorer.py` in the list.
+   You should see `pvt_explorer.py` in the list. If instead you see another folder (unzipping sometimes creates a folder inside a folder), `cd` into that one too and check again.
 
 ---
 
@@ -204,3 +209,45 @@ Maximize the window. The layout is designed for a full-size screen.
 
 **Still stuck?**
 Copy the *entire* error message (the last few lines are the most important) and bring it to office hours or email it to your instructor.
+
+---
+
+## For instructors
+
+This tool was built for a sophomore-level engineering thermodynamics course. It is meant to help students connect the 3D p-v-T surface to the 2D property diagrams and tables they use every day. It is free to use, modify, and share under the MIT License.
+
+### Topics it supports
+- The vapor dome: saturated liquid and saturated vapor lines, the critical point, and the compressed liquid, saturated mixture, and superheated vapor regions
+- Why pressure and temperature are not independent inside the dome, and why the two-phase region collapses to a single curve (the vaporization curve) in the p-T diagram
+- Reading saturation properties (p_sat, T_sat, v_f, v_g) and checking them against steam tables
+- Common processes: constant-pressure heating (piston-cylinder, boiler), constant-volume heating (rigid tank), and isothermal compression
+- The rigid-tank question of whether a heated mixture ends as liquid or vapor, depending on whether v is below or above the critical specific volume
+- Behavior above the critical point, and the approach to ideal-gas behavior at large specific volume
+- (With `--eos vdw`) how a cubic equation of state produces a vapor dome, and the Maxwell equal-area construction
+
+### Ways to use it
+- **Live demo in lecture.** Project it and drag the slider while students predict what the red curve will do in each 2D diagram before you move it. Maximizing the window and turning off *Show surface* makes the dome easier to see from the back of the room.
+- **In-class activity or homework.** The "Things to try" questions above work as a short worksheet. Asking students to verify values against the saturated water tables in the course textbook builds trust in both the tool and the tables.
+- **Slides and exams.** `python pvt_explorer.py --save name` writes a PNG for each slicing mode without opening a window. To change the slice values used, edit the `defaults` in the `CoolPropFluid` class near the top of the script.
+- **Other fluids.** Refrigerant cycles can use `--fluid R134a`. Any fluid name supported by CoolProp works.
+
+### Accuracy
+- Real-fluid properties come from [CoolProp](http://www.coolprop.org), which implements reference-quality Helmholtz-energy equations of state. For water this is the IAPWS-95 formulation, the same basis as modern steam tables, so values agree with textbook tables to the precision the tables print. Example: at 1 MPa the program gives T_sat ≈ 179.9 °C.
+- Saturation values shown on screen are interpolated from a finely spaced saturation table computed at startup (clustered near the critical point). Small differences in the last printed digit compared with tables are possible.
+- The van der Waals option is a qualitative model in reduced units (p/p_c, v/v_c, T/T_c). It reproduces the shape of real behavior but not real numbers. Its saturation curve is computed with the Maxwell equal-area construction.
+
+### Limitations
+- **No solid phase.** The surface starts about 1 K above the triple point. Solid, solid-liquid (melting), and solid-vapor (sublimation) regions are not shown, so the p-T diagram shows only the vaporization curve.
+- **Logarithmic p and v axes.** These are needed to show the thin liquid region and the huge vapor region on one plot, but they make the surface look different from the stylized linear-axis sketches in most textbooks. It's worth pointing this out to students.
+- **Plotted range.** Temperatures run from just above the triple point to 1.4 T_c, and pressures up to 4.5 p_c.
+- **Metastable states are not shown.** The van der Waals loops inside the dome (superheated liquid and subcooled vapor) are replaced by the flat equilibrium lines.
+
+### Requirements
+Python 3 with numpy, scipy, and matplotlib, plus CoolProp for real-fluid data. Everything can be installed at once with:
+```
+python -m pip install -r requirements.txt
+```
+If CoolProp is not available, the program automatically falls back to the van der Waals fluid.
+
+### Feedback and contributions
+Suggestions, bug reports, and classroom experiences are welcome through GitHub Issues on this repository. If you adapt the tool for your own course, a note about how you used it helps improve it.
