@@ -1,6 +1,6 @@
 # p-v-T Surface Explorer
 
-![p-v-T explorer showing a 1 MPa isobar crossing the vapor dome of water](Images/screenshot_p.png)
+![Browser version of the p-v-T explorer showing a 200 °C isotherm of water crossing the vapor dome](Images/screenshot_web.png)
 
 An interactive 3D picture of how a pure substance (like water) behaves as you change its **pressure (p)**, **specific volume (v)**, and **temperature (T)**. You can rotate the surface, slice it at constant p, v, or T, and see how the familiar p-v, T-v, and p-T diagrams from class are just slices and "shadows" of this one 3D shape.
 
